@@ -5,16 +5,19 @@ import (
 	"context"
 	"encoding/gob"
 	"fmt"
+	"io"
 	"reflect"
 	"runtime"
 	"time"
 
+	"github.com/altipla-consulting/datetime"
 	altiplaerrors "github.com/altipla-consulting/errors"
 	"github.com/altipla-consulting/sentry"
+	"github.com/golang/protobuf/proto"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
-	pbqueues "github.com/altipla-consulting/delay/queues"
+	pb "github.com/altipla-consulting/delay/queues"
 )
 
 var (
@@ -83,7 +86,7 @@ type invocation struct {
 // Task builds a task invocation to the function. You can later send the task
 // in batches using queue.SendTasks() or directly invoke Call() to make both things
 // at the same time.
-func (f *Function) Task(args ...interface{}) (*pbqueues.SendTask, error) {
+func (f *Function) Task(args ...interface{}) (*pb.SendTask, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -149,7 +152,7 @@ func (f *Function) Task(args ...interface{}) (*pbqueues.SendTask, error) {
 		return nil, err
 	}
 
-	return &pbqueues.SendTask{
+	return &pb.SendTask{
 		Payload: buf.Bytes(),
 	}, nil
 }
@@ -166,7 +169,7 @@ func (f *Function) Call(ctx context.Context, queue QueueSpec, args ...interface{
 		return err
 	}
 
-	return queue.SendTasks(ctx, []*pbqueues.SendTask{task})
+	return queue.SendTasks(ctx, []*pb.SendTask{task})
 }
 
 // Listener is a background goroutine that handles messages from the queues
@@ -205,70 +208,119 @@ func (lis *Listener) Handle(queue QueueSpec) {
 func (lis *Listener) listenQueue(queue QueueSpec) error {
 	group, ctx := errgroup.WithContext(context.Background())
 
-	stream, err := queue.conn.client.Listen(ctx)
-	if err != nil {
-		return fmt.Errorf("delay: cannot listen to the queue: %v", err)
-	}
+	if queue.conn.redisClient != nil {
+		group.Go(func() error {
+			pubsub := queue.conn.redisClient.Subscribe(queue.name)
 
-	initial := &pbqueues.ListenRequest{
-		Request: &pbqueues.ListenRequest_Initial{
-			Initial: &pbqueues.ListenInitial{
-				Project:   queue.conn.project,
-				QueueName: queue.name,
-			},
-		},
-	}
-	if err := stream.Send(initial); err != nil {
-		return fmt.Errorf("delay: cannot send initial connection info: %v", err)
-	}
+			var i int64
+			for msg := range pubsub.Channel() {
+				buf := proto.NewBuffer([]byte(msg.Payload))
+				for {
+					sendTask := new(pb.SendTask)
+					if err := buf.DecodeMessage(sendTask); err != nil {
+						if err == io.EOF {
+							break
+						}
 
-	group.Go(func() error {
-		for {
-			reply, err := stream.Recv()
-			if err != nil {
-				return fmt.Errorf("delay: cannot receive tasks: %v", err)
-			}
+						return fmt.Errorf("delay: cannot decode incoming task: %v", err)
+					}
 
-			group.Go(func() error {
-				log.WithFields(log.Fields{
-					"project": reply.Task.Project,
-					"queue":   reply.Task.QueueName,
-					"task":    reply.Task.Code,
-				}).Debug("Task received")
-
-				var failed bool
-				if err := handleTask(ctx, reply.Task); err != nil {
-					failed = true
+					i++
+					task := &pb.Task{
+						Code:    fmt.Sprintf("sim-%d", i),
+						Payload: sendTask.Payload,
+						Created: datetime.SerializeTimestamp(time.Now()),
+						Retry:   0,
+						Project: queue.conn.project,
+						MinEta:  sendTask.MinEta,
+					}
 
 					log.WithFields(log.Fields{
-						"error":   err.Error(),
-						"details": altiplaerrors.Details(err),
+						"project": task.Project,
+						"queue":   task.QueueName,
+						"task":    task.Code,
+					}).Debug("Task received")
+
+					if err := handleTask(ctx, task); err != nil {
+						log.WithFields(log.Fields{
+							"error":   err.Error(),
+							"details": altiplaerrors.Details(err),
+							"project": task.Project,
+							"queue":   task.QueueName,
+							"task":    task.Code,
+						}).Error("Task handler failed")
+					}
+				}
+			}
+
+			return nil
+		})
+	} else {
+		stream, err := queue.conn.queuesClient.Listen(ctx)
+		if err != nil {
+			return fmt.Errorf("delay: cannot listen to the queue: %v", err)
+		}
+
+		initial := &pb.ListenRequest{
+			Request: &pb.ListenRequest_Initial{
+				Initial: &pb.ListenInitial{
+					Project:   queue.conn.project,
+					QueueName: queue.name,
+				},
+			},
+		}
+		if err := stream.Send(initial); err != nil {
+			return fmt.Errorf("delay: cannot send initial connection info: %v", err)
+		}
+
+		group.Go(func() error {
+			for {
+				reply, err := stream.Recv()
+				if err != nil {
+					return fmt.Errorf("delay: cannot receive tasks: %v", err)
+				}
+
+				group.Go(func() error {
+					log.WithFields(log.Fields{
 						"project": reply.Task.Project,
 						"queue":   reply.Task.QueueName,
 						"task":    reply.Task.Code,
-					}).Error("Task handler failed")
+					}).Debug("Task received")
 
-					if lis.sentryClient != nil {
-						lis.sentryClient.ReportInternal(ctx, err)
+					var failed bool
+					if err := handleTask(ctx, reply.Task); err != nil {
+						failed = true
+
+						log.WithFields(log.Fields{
+							"error":   err.Error(),
+							"details": altiplaerrors.Details(err),
+							"project": reply.Task.Project,
+							"queue":   reply.Task.QueueName,
+							"task":    reply.Task.Code,
+						}).Error("Task handler failed")
+
+						if lis.sentryClient != nil {
+							lis.sentryClient.ReportInternal(ctx, err)
+						}
 					}
-				}
 
-				req := &pbqueues.ListenRequest{
-					Request: &pbqueues.ListenRequest_Ack{
-						Ack: &pbqueues.Ack{
-							Code:    reply.Task.Code,
-							Success: !failed,
+					req := &pb.ListenRequest{
+						Request: &pb.ListenRequest_Ack{
+							Ack: &pb.Ack{
+								Code:    reply.Task.Code,
+								Success: !failed,
+							},
 						},
-					},
-				}
-				if err := stream.Send(req); err != nil {
-					return fmt.Errorf("delay: cannot ack task: %v", err)
-				}
+					}
+					if err := stream.Send(req); err != nil {
+						return fmt.Errorf("delay: cannot ack task: %v", err)
+					}
 
-				return nil
-			})
-		}
-	})
+					return nil
+				})
+			}
+		})
+	}
 
 	if err := group.Wait(); err != nil {
 		return fmt.Errorf("delay: error closing the background queue goroutines: %v", err)
@@ -277,7 +329,7 @@ func (lis *Listener) listenQueue(queue QueueSpec) error {
 	return nil
 }
 
-func handleTask(ctx context.Context, task *pbqueues.Task) error {
+func handleTask(ctx context.Context, task *pb.Task) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 

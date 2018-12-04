@@ -5,20 +5,23 @@ import (
 	"crypto/tls"
 	"fmt"
 
+	"github.com/go-redis/redis"
+	"github.com/golang/protobuf/proto"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
-	pbqueues "github.com/altipla-consulting/delay/queues"
+	pb "github.com/altipla-consulting/delay/queues"
 )
 
 const beauthTokenEndpoint = "https://beauth.io/token"
 
 // Conn represents a connection to the queues server.
 type Conn struct {
-	project string
-	client  pbqueues.QueuesServiceClient
+	project      string
+	queuesClient pb.QueuesServiceClient
+	redisClient  *redis.Client
 }
 
 // NewConn opens a new connection to a queues server. It needs the project and the OAuth
@@ -37,8 +40,17 @@ func NewConn(project, clientID, clientSecret string) (*Conn, error) {
 	}
 
 	return &Conn{
-		project: project,
-		client:  pbqueues.NewQueuesServiceClient(conn),
+		project:      project,
+		queuesClient: pb.NewQueuesServiceClient(conn),
+	}, nil
+}
+
+// NewDebugConn creates a new local debugging connection that uses a direct Redis
+// queue to simulate the queue. The downside is both the sender and receiver should
+// be connected at the same time to send the message; there is no storage.
+func NewDebugConn() (*Conn, error) {
+	return &Conn{
+		redisClient: redis.NewClient(&redis.Options{Addr: "redis:6379"}),
 	}, nil
 }
 
@@ -73,14 +85,28 @@ func Queue(conn *Conn, name string) QueueSpec {
 }
 
 // SendTasks sends a list of tasks in batch to a queue.
-func (queue QueueSpec) SendTasks(ctx context.Context, tasks []*pbqueues.SendTask) error {
-	req := &pbqueues.SendTasksRequest{
+func (queue QueueSpec) SendTasks(ctx context.Context, tasks []*pb.SendTask) error {
+	if queue.conn.redisClient != nil {
+		var buf proto.Buffer
+		for _, task := range tasks {
+			if err := buf.EncodeMessage(task); err != nil {
+				return fmt.Errorf("delay: cannot encode task: %v", err)
+			}
+		}
+		if err := queue.conn.redisClient.Publish(queue.name, buf.Bytes()).Err(); err != nil {
+			return fmt.Errorf("delay: cannot send to the debug queue: %v", err)
+		}
+
+		return nil
+	}
+
+	req := &pb.SendTasksRequest{
 		Project:   queue.conn.project,
 		QueueName: queue.name,
 		Tasks:     tasks,
 	}
 	var err error
-	_, err = queue.conn.client.SendTasks(ctx, req)
+	_, err = queue.conn.queuesClient.SendTasks(ctx, req)
 	if err != nil {
 		return fmt.Errorf("delay: cannot send tasks: %v", err)
 	}
