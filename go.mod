@@ -1,10 +1,12 @@
 module github.com/altipla-consulting/delay
 
 require (
+	github.com/altipla-consulting/datetime v1.0.0
 	github.com/altipla-consulting/errors v1.0.0
 	github.com/altipla-consulting/sentry v0.3.1
 	github.com/certifi/gocertifi v0.0.0-20180905225744-ee1a9a0726d2 // indirect
 	github.com/getsentry/raven-go v0.2.0 // indirect
+	github.com/go-redis/redis v6.14.2+incompatible
 	github.com/golang/protobuf v1.2.0
 	github.com/pkg/errors v0.8.0 // indirect
 	github.com/sirupsen/logrus v1.2.0

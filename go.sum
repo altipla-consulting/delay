@@ -1,4 +1,6 @@
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
+github.com/altipla-consulting/datetime v1.0.0 h1:XMt40JCf+RiSrQWkQQNT105+L2iq303g+P/XBdfDNYw=
+github.com/altipla-consulting/datetime v1.0.0/go.mod h1:aNBftKDuPbdvpNP2VN6c+fCjfhgHLZ+qR4wwrvhbGvk=
 github.com/altipla-consulting/errors v1.0.0 h1:pqJ7lvI8qbR+33iRcraZAxAo8O9JLT0jOPkxFT2PIDM=
 github.com/altipla-consulting/errors v1.0.0/go.mod h1:Kx/Za5NafyVL6FgVNm+JCJejAFsne5XRd1Hn2WKC9Tw=
 github.com/altipla-consulting/sentry v0.3.1 h1:v3MaAFNhwv4/Cy6utR7G2EZH37oESTYX/7fUY4E6W5A=
@@ -9,6 +11,8 @@ github.com/client9/misspell v0.3.4/go.mod h1:qj6jICC3Q7zFZvVWo7KLAzC3yx5G7kyvSDk
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/getsentry/raven-go v0.2.0 h1:no+xWJRb5ZI7eE8TWgIq1jLulQiIoLG0IfYxv5JYMGs=
 github.com/getsentry/raven-go v0.2.0/go.mod h1:KungGk8q33+aIAZUIVWZDr2OfAEBsO49PX4NzFV5kcQ=
+github.com/go-redis/redis v6.14.2+incompatible h1:UE9pLhzmWf+xHNmZsoccjXosPicuiNaInPgym8nzfg0=
+github.com/go-redis/redis v6.14.2+incompatible/go.mod h1:NAIEuMOZ/fxfXJIrKDQDz8wamY7mA7PouImQ2Jvg6kA=
 github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b/go.mod h1:SBH7ygxi8pfUlaOkMMuAQtPIUF8ecWP5IEl/CR7VP2Q=
 github.com/golang/lint v0.0.0-20180702182130-06c8688daad7/go.mod h1:tluoj9z5200jBnyusfRPU2LqT6J+DAorxEvtC7LHB+E=
 github.com/golang/mock v1.1.1/go.mod h1:oTYuIxOrZwtPieC+H1uAHpcLFnEyAGVDL/k47Jfbm0A=
