@@ -1,6 +1,8 @@
 
 # delay
 
+> **DEPRECATED:** Use https://github.com/altipla-consulting/libs instead.
+
 [![GoDoc](https://godoc.org/github.com/altipla-consulting/delay?status.svg)](https://godoc.org/github.com/altipla-consulting/delay)
 [![Build Status](https://travis-ci.org/altipla-consulting/delay.svg?branch=master)](https://travis-ci.org/altipla-consulting/delay)
 
